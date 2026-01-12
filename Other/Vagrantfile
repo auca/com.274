@@ -1,0 +1,112 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+  config.vm.box_version = "202510.26.0"
+  config.vm.network "forwarded_port", guest: 8080, host: 8080
+
+  cpus   = 4
+  memory = "4096"
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+    vb.gui    = true
+    vb.cpus   = cpus
+    vb.memory = memory
+  end
+  config.vm.provider "vmware_desktop" do |vmware|
+    vmware.vmx["vhv.enable"] = "TRUE"
+    vmware.gui    = true
+    vmware.cpus   = cpus
+    vmware.memory = memory
+  end
+  # config.vm.disk :disk, size: "64GB", primary: true
+
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e  # Exit on any error
+
+    # Suppress interactive prompts during package installation
+    export DEBIAN_FRONTEND=noninteractive
+    export NEEDRESTART_MODE=a
+
+    # Take all the disk space available (if LVM is present)
+    if [ -e /dev/mapper/ubuntu--vg-ubuntu--lv ]; then
+      pvresize /dev/sda3
+      lvresize -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
+      resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+    fi
+
+    # Enable source repositories
+    if ! grep -q 'Types:.*deb-src' /etc/apt/sources.list.d/ubuntu.sources; then
+      sed -i 's/^Types: deb/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+    fi
+
+    # Update and upgrade the system
+    apt-get update
+    apt-get upgrade -y
+
+    # Install virtualization tools
+    apt-get install -y open-vm-tools
+
+    # Install basic OS software and documentation
+    apt-get install -y strace lsof psmisc htop
+    apt-get install -y command-not-found tree curl tmux
+    apt-get install -y man-db manpages-posix manpages-dev
+
+    # Install basic developer tools
+    apt-get install -y vim git python3 python3-pip python3-argcomplete python3-requests flake8 pylint cargo rustc pipx
+
+    # Install C/C++ compilers, build systems, and debuggers
+    apt-get install -y gcc g++ clang ccache
+    apt-get install -y make cmake
+    apt-get install -y gdb gdb-multiarch
+
+    # Install the QEMU emulator/virtualizer
+    apt-get install -y qemu-system qemu-user qemu-user-binfmt qemu-utils
+
+    # Install libraries and tools required by course projects
+    apt-get install -y pkg-config libncurses-dev
+
+    # Install kernel build dependencies
+    apt-get install -y dpkg-dev gawk flex bison openssl libssl-dev dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf llvm linux-tools-common fakeroot
+    apt-get build-dep -y linux linux-image-unsigned-$(uname -r)
+
+    # Install virtme-ng dependencies
+    apt-get install -y busybox-static virtiofsd socat
+
+    # Install virtme-ng from source (with fast Rust-based init)
+    git clone https://github.com/arighi/virtme-ng.git /opt/virtme-ng
+    cd /opt/virtme-ng
+    BUILD_VIRTME_NG_INIT=1 pip3 install --break-system-packages .
+
+    # Install kernel profiling and debugging tools (perf, eBPF, tracing)
+    apt-get install -y linux-tools-generic
+    apt-get install -y bpfcc-tools python3-bpfcc bpftrace libbpf-dev dwarves
+    apt-get install -y trace-cmd kdump-tools
+    pip3 install --break-system-packages --ignore-installed mcp anyio
+    pip3 install --break-system-packages drgn
+
+    # Add vagrant to kvm group for hardware acceleration
+    usermod -aG kvm vagrant
+
+    # Uncomment to install a GUI environment (GNOME)
+    # apt-get install -y ubuntu-desktop-minimal open-vm-tools-desktop
+
+    # Cleanup
+    apt-get autoremove -y
+  SHELL
+
+  config.vm.provision "shell", privileged: false, inline: <<-SHELL
+    # Set up ccache in user's environment
+    cat >> ~/.bashrc << 'EOF'
+
+# ccache for kernel builds
+export PATH="/usr/lib/ccache:$PATH"
+export KBUILD_BUILD_TIMESTAMP=0
+EOF
+
+    # Configure user-specific ccache settings
+    ccache --max-size=10G
+    ccache --set-config=compression=true
+  SHELL
+end
