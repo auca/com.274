@@ -7,3 +7,7 @@
 ## Project 2
 
 * <https://github.com/toksaitov/ext4-bitmap-project>
+
+## Project 3
+
+* <https://github.com/toksaitov/vma-hlist-project>
